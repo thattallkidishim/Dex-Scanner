@@ -11,6 +11,7 @@ async function sendTelegram(message) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message })
     });
+    console.log("Alert sent to Telegram");
   } catch (err) {
     console.log("Telegram error:", err.message);
   }
@@ -18,41 +19,49 @@ async function sendTelegram(message) {
 
 async function scan() {
   try {
-    const res = await fetch("https://api.dexscreener.com/latest/dex/tokens/SOL");
+    const res = await fetch("https://api.dexscreener.com/token-boosts/latest/v1");
     const text = await res.text();
     
-    if (text.startsWith("<!")) {
-      console.log("API returned HTML, waiting...");
+    if (text.startsWith("<!") || text.startsWith("<")) {
+      console.log("API returned HTML, skipping...");
       return;
     }
     
     const data = JSON.parse(text);
-    const pairs = data.pairs || [];
+    let newCount = 0;
     
-    for (const pair of pairs) {
-      if (seenPairs.has(pair.pairAddress)) continue;
-      seenPairs.add(pair.pairAddress);
+    for (const token of data) {
+      if (seenPairs.has(token.tokenAddress)) continue;
+      seenPairs.add(token.tokenAddress);
+      newCount++;
       
-      const liquidity = pair.liquidity ? pair.liquidity.usd : 0;
-      const hasInfo = pair.info && pair.info.websites && pair.info.websites.length > 0;
-      
-      if (liquidity >= 1000) {
-        let msg = "New Pair Detected\n";
-        msg += "Name: " + (pair.baseToken ? pair.baseToken.name : "Unknown") + "\n";
-        msg += "Symbol: " + (pair.baseToken ? pair.baseToken.symbol : "???") + "\n";
-        msg += "Chain: " + (pair.chainId ? pair.chainId.toUpperCase() : "Unknown") + "\n";
-        msg += "Liquidity: $" + (liquidity / 1000).toFixed(2) + "K\n";
-        msg += "Price: $" + (pair.priceUsd || "0") + "\n";
-        msg += "Contract: " + (pair.baseToken ? pair.baseToken.address : "N/A");
-        msg += "\n\nDexscreener: https://dexscreener.com/" + pair.chainId + "/" + pair.pairAddress;
-        
-        console.log(msg);
-        console.log("---");
-        await sendTelegram(msg);
-        await new Promise(function(r) { setTimeout(r, 1500); });
+      const socials = [];
+      if (token.links) {
+        for (let i = 0; i < token.links.length; i++) {
+          if (token.links[i].url) socials.push(token.links[i].url);
+        }
       }
+      
+      let msg = "New Token Detected\n";
+      msg += "Name: " + (token.description || "Unknown") + "\n";
+      msg += "Chain: " + (token.chainId ? token.chainId.toUpperCase() : "Unknown") + "\n";
+      msg += "Contract: " + token.tokenAddress;
+      msg += "\n\nDexscreener: " + (token.url || "https://dexscreener.com");
+      
+      if (socials.length > 0) {
+        msg += "\n\nSocials:";
+        for (let i = 0; i < socials.length; i++) {
+          msg += "\n" + socials[i];
+        }
+      }
+      
+      console.log(msg);
+      console.log("---");
+      await sendTelegram(msg);
+      await new Promise(function(r) { setTimeout(r, 1500); });
     }
-    console.log("Scanned " + pairs.length + " pairs, tracking " + seenPairs.size + " total");
+    
+    console.log("Found " + newCount + " new tokens, tracking " + seenPairs.size + " total");
   } catch (err) {
     console.log("Scan error:", err.message);
   }
