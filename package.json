@@ -1,12 +1,9 @@
 {
   "name": "dex-scanner",
   "version": "1.0.0",
-  "main": "scanner.js",
   "scripts": {
-    "start": "node scanner.js",
-    "build": "echo 'No build needed'"
+    "start": "node scanner.js"
   },
-  "dependencies": {},
   "engines": {
     "node": "20.x"
   }
