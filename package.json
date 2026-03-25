@@ -1,6 +1,7 @@
 {
-  "name": "alpha-x-sniper",
-  "version": "6.3.0",
+  "name": "dex-early-sniper",
+  "version": "8.0.0",
+  "description": "Dex-only multi-chain early token scanner (<50K MC) with socials & Twitter/X region alerts. Mobile-friendly, verified users only.",
   "main": "scanner.js",
   "scripts": {
     "start": "node scanner.js"
@@ -8,6 +9,5 @@
   "engines": {
     "node": "20.x"
   },
-  "description": "Dex + optional X early launch sniper bot (<50K MC, first-alert only, mobile stable)",
   "license": "MIT"
 }
