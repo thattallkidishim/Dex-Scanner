@@ -7,7 +7,6 @@ const http = require("http");
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 
-// Users and seen items
 const approvedUsers = new Set();
 const seenTokens = new Set();
 const alertedTokens = new Set();
@@ -93,7 +92,7 @@ async function handleStart(chatId, userId) {
   } else {
     await sendMessage(chatId,
       "Welcome!\n\nTo get access, request your code from @motionw404 on Telegram.\n\n" +
-      "Then enter it here:\n/code YOURCODE\n\nExample: /code ABC123"
+      "Paste the code here to verify."
     );
   }
 }
@@ -105,10 +104,12 @@ async function handleCode(chatId, userId, code) {
       await sendMessage(chatId, "✅ You are already verified!");
       return;
     }
+
     if (!code) {
-      await sendMessage(chatId, "Please enter a code.\n\nExample: /code ABC123");
+      await sendMessage(chatId, "❌ Please provide a valid verification code.");
       return;
     }
+
     const codeUpper = code.toUpperCase().trim();
     if (validCodes.has(codeUpper)) {
       validCodes.delete(codeUpper);
@@ -146,7 +147,7 @@ async function handleCodes(chatId, userId) {
 }
 
 // =====================
-// PROCESS TELEGRAM UPDATES
+// PROCESS TELEGRAM UPDATES (STRICT CODE ONLY)
 // =====================
 async function processUpdate(update) {
   if (!update.message || !update.message.text) return;
@@ -156,9 +157,15 @@ async function processUpdate(update) {
 
   try {
     if (text === "/start") await handleStart(chatId, userId);
-    else if (text.startsWith("/code ")) await handleCode(chatId, userId, text.substring(6).trim());
-    else if (text === "/code") await sendMessage(chatId, "Please enter your code.\n\nExample: /code ABC123");
-    else if (text === "/newcode") await handleNewCode(chatId, userId);
+    else if (String(userId) !== String(ADMIN_USER_ID) && !approvedUsers.has(String(userId))) {
+      // STRICT CODE ONLY
+      const codeUpper = text.toUpperCase().trim();
+      if (validCodes.has(codeUpper)) {
+        await handleCode(chatId, userId, codeUpper);
+      } else {
+        await sendMessage(chatId, "❌ Invalid code. Please request a valid one from @motionw404.");
+      }
+    } else if (text === "/newcode") await handleNewCode(chatId, userId);
     else if (text === "/users") await handleUsers(chatId, userId);
     else if (text === "/codes") await handleCodes(chatId, userId);
   } catch {}
@@ -251,7 +258,7 @@ async function sendMessageToAll(msg) {
 http.createServer((req, res) => res.end("Dex Scanner Bot Running")).listen(process.env.PORT || 3000);
 
 // =====================
-// START BOT (RAILWAY SAFE)
+// START BOT
 (async () => {
   try {
     pollMessages();
