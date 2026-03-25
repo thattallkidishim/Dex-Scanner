@@ -8,7 +8,6 @@ const http = require("http");
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 
-const validCodes = new Set();
 const approvedUsers = new Set();
 const seenTokens = new Set();
 
@@ -46,17 +45,24 @@ function sendMessage(chatId, text) {
 }
 
 // =====================
-// FETCH (FIXED)
+// SAFE FETCH (ANTI-BLOCK)
 // =====================
 
 function fetchUrl(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
-      { headers: { "User-Agent": "Mozilla/5.0" } }, // FIX: prevents X blocking
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept": "application/json, text/plain, */*",
+          "Referer": "https://pump.fun/",
+          "Origin": "https://pump.fun"
+        }
+      },
       (res) => {
         let data = "";
-        res.on("data", (d) => (data += d));
+        res.on("data", (chunk) => (data += chunk));
         res.on("end", () => resolve({ data }));
       }
     );
@@ -70,7 +76,7 @@ function fetchUrl(url) {
 }
 
 // =====================
-// X SCORE + CREATION DATE
+// X SCORING + CREATED DATE
 // =====================
 
 async function scoreTwitter(url) {
@@ -83,19 +89,18 @@ async function scoreTwitter(url) {
     if (html.includes("followers")) score++;
     if (html.includes("verified")) score += 2;
 
-    // ===== CREATION DATE =====
+    // ===== CREATED DATE =====
     let created = "Unknown";
 
-    const joinMatch = html.match(/Joined\s([A-Za-z]+\s\d{4})/);
-    if (joinMatch) {
-      created = joinMatch[1];
+    const match = html.match(/Joined\s([A-Za-z]+\s\d{4})/);
+    if (match) {
+      created = match[1];
 
       const year = parseInt(created.split(" ")[1]);
-      const currentYear = new Date().getFullYear();
+      const now = new Date().getFullYear();
 
-      // newer accounts = lower score (good)
-      if (currentYear - year <= 1) score -= 1;
-      if (currentYear - year >= 3) score += 1;
+      if (now - year <= 1) score -= 1; // newer = better
+      if (now - year >= 3) score += 1;
     }
 
     // ===== REGION =====
@@ -114,7 +119,7 @@ async function scoreTwitter(url) {
 }
 
 // =====================
-// ALERT
+// ALERT SYSTEM
 // =====================
 
 async function sendAlert(msg) {
@@ -127,7 +132,7 @@ async function sendAlert(msg) {
 }
 
 // =====================
-// DEX SCANNER (<50K MC)
+// DEXSCREENER SCANNER (<50K)
 // =====================
 
 async function scanDex() {
@@ -198,49 +203,69 @@ ${socials.join("\n")}`;
 }
 
 // =====================
-// PUMPFUN SCANNER (<50K MC)
+// PUMPFUN SCANNER (BEST VERSION)
 // =====================
 
 async function scanPump() {
   try {
-    const res = await fetchUrl("https://frontend-api.pump.fun/coins");
+    const endpoints = [
+      "https://frontend-api.pump.fun/coins/latest",
+      "https://frontend-api.pump.fun/coins/trending"
+    ];
 
-    if (!res.data || res.data.startsWith("<")) return;
+    for (const url of endpoints) {
+      const res = await fetchUrl(url);
 
-    const data = JSON.parse(res.data);
-
-    for (const t of data) {
-      if (!t.mint || seenTokens.has(t.mint)) continue;
-
-      const mc = t.market_cap || 0;
-
-      // 🔥 HARD FILTER
-      if (mc === 0 || mc > 50000) continue;
-
-      seenTokens.add(t.mint);
-
-      if (!t.name) continue;
-
-      const socials = [];
-
-      if (t.twitter) socials.push(t.twitter);
-      if (t.telegram) socials.push(t.telegram);
-
-      if (socials.length === 0) continue;
-
-      let twitter = socials.find(
-        (s) => s.includes("x.com") || s.includes("twitter")
-      );
-
-      let x = { score: 0, region: "Unknown", created: "Unknown" };
-
-      if (twitter) {
-        x = await scoreTwitter(twitter);
+      if (!res.data || res.data.startsWith("<") || res.data.includes("error code")) {
+        console.log("Pump blocked:", url);
+        continue;
       }
 
-      if (x.score > 3) continue;
+      let data;
+      try {
+        data = JSON.parse(res.data);
+      } catch {
+        continue;
+      }
 
-      let msg = `🚀 Pump Early (<50K MC)
+      for (const t of data) {
+        if (!t.mint || seenTokens.has(t.mint)) continue;
+
+        const mc = t.market_cap || 0;
+
+        // 🔥 HARD FILTER
+        if (mc === 0 || mc > 50000) continue;
+
+        seenTokens.add(t.mint);
+
+        if (!t.name) continue;
+
+        const socials = [];
+
+        if (t.twitter) socials.push(t.twitter);
+        if (t.telegram) socials.push(t.telegram);
+        if (t.website) socials.push(t.website);
+
+        if (socials.length === 0 && t.description) {
+          const matches = t.description.match(/https?:\/\/[^\s]+/g);
+          if (matches) socials.push(...matches);
+        }
+
+        if (socials.length === 0 || socials.length > 3) continue;
+
+        let twitter = socials.find(
+          (s) => s.includes("x.com") || s.includes("twitter")
+        );
+
+        let x = { score: 0, region: "Unknown", created: "Unknown" };
+
+        if (twitter) {
+          x = await scoreTwitter(twitter);
+        }
+
+        if (x.score > 3) continue;
+
+        let msg = `🚀 Pump Early (<50K MC)
 
 Name: ${t.name}
 
@@ -255,22 +280,25 @@ Region: ${x.region}
 
 ${socials.join("\n")}`;
 
-      await sendAlert(msg);
+        console.log("Pump hit:", t.name);
+
+        await sendAlert(msg);
+
+        await new Promise((r) => setTimeout(r, 200));
+      }
     }
   } catch (err) {
-    console.log("Pump error:", err.message);
+    console.log("Pump fatal:", err.message);
   }
 }
 
 // =====================
-// SERVER
+// SERVER (KEEP ALIVE)
 // =====================
 
-http
-  .createServer((req, res) => {
-    res.end("Running");
-  })
-  .listen(process.env.PORT || 3000);
+http.createServer((req, res) => {
+  res.end("Running");
+}).listen(process.env.PORT || 3000);
 
 // =====================
 // START
@@ -279,7 +307,7 @@ http
 setInterval(() => {
   scanDex();
   scanPump();
-}, 4000);
+}, 7000);
 
 scanDex();
 scanPump();
