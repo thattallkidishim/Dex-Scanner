@@ -1,6 +1,6 @@
 {
   "name": "alpha-sniper-bot",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "main": "scanner.js",
   "scripts": {
     "start": "node scanner.js"
@@ -8,6 +8,6 @@
   "engines": {
     "node": "20.x"
   },
-  "description": "Early crypto sniper bot (Dex + Pump.fun + X intelligence)",
+  "description": "Early-stage crypto sniper bot (Dex + Pump + X intelligence + anti-bot)",
   "license": "MIT"
 }
