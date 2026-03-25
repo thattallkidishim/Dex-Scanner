@@ -2,208 +2,64 @@ const https = require("https");
 const http = require("http");
 
 // =====================
-// CONFIGURATION
+// CONFIG
 // =====================
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 
-// Dynamic one-time codes
 const validCodes = new Set();
-
-// Verified users
 const approvedUsers = new Set();
+const seenTokens = new Set();
 
-// Add admin automatically
 if (ADMIN_USER_ID) {
   approvedUsers.add(String(ADMIN_USER_ID));
 }
 
-// Track seen tokens
-const seenTokens = new Set();
-
 // =====================
-// TELEGRAM FUNCTIONS
+// TELEGRAM
 // =====================
 
 function sendMessage(chatId, text) {
   return new Promise((resolve, reject) => {
-    const url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage";
-    const postData = JSON.stringify({ chat_id: chatId, text: text });
+    const data = JSON.stringify({ chat_id: chatId, text });
 
-    const req = https.request(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(postData)
+    const req = https.request(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(data),
+        },
+      },
+      (res) => {
+        res.on("data", () => {});
+        res.on("end", resolve);
       }
-    }, (res) => {
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => resolve(data));
-    });
+    );
 
     req.on("error", reject);
-    req.write(postData);
+    req.write(data);
     req.end();
   });
 }
 
 // =====================
-// COMMAND HANDLERS
+// FETCH (FIXED)
 // =====================
 
-async function handleStart(chatId, userId) {
-  if (approvedUsers.has(String(userId))) {
-    await sendMessage(chatId, "✅ Verified. You will receive alerts.");
-  } else {
-    await sendMessage(chatId, "Request for code and command from @motionw404 on Telegram.");
-  }
-}
-
-async function handleCode(chatId, userId, code) {
-  const userIdStr = String(userId);
-
-  if (approvedUsers.has(userIdStr)) {
-    await sendMessage(chatId, "✅ Already verified.");
-    return;
-  }
-
-  if (!code) {
-    await sendMessage(chatId, "Use: /code YOURCODE");
-    return;
-  }
-
-  const codeUpper = code.toUpperCase().trim();
-
-  if (validCodes.has(codeUpper)) {
-    validCodes.delete(codeUpper);
-    approvedUsers.add(userIdStr);
-
-    await sendMessage(chatId, "✅ Access granted.");
-    console.log("Verified:", userId);
-  } else {
-    await sendMessage(chatId, "❌ Invalid code.");
-  }
-}
-
-async function handleNewCode(chatId, userId) {
-  if (String(userId) !== String(ADMIN_USER_ID)) {
-    await sendMessage(chatId, "Admin only.");
-    return;
-  }
-
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let newCode = "";
-
-  for (let i = 0; i < 8; i++) {
-    newCode += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-
-  validCodes.add(newCode);
-
-  await sendMessage(chatId, "🔑 Code:\n" + newCode);
-}
-
-async function handleUsers(chatId, userId) {
-  if (String(userId) !== String(ADMIN_USER_ID)) return;
-  await sendMessage(chatId, "Users: " + approvedUsers.size);
-}
-
-// =====================
-// PROCESS MESSAGES
-// =====================
-
-async function processUpdate(update) {
-  try {
-    if (!update.message || !update.message.text) return;
-
-    const chatId = update.message.chat.id;
-    const userId = update.message.from.id;
-    const text = update.message.text.trim();
-
-    if (text === "/start") {
-      await handleStart(chatId, userId);
-    } else if (text.startsWith("/code ")) {
-      await handleCode(chatId, userId, text.substring(6));
-    } else if (text === "/newcode") {
-      await handleNewCode(chatId, userId);
-    } else if (text === "/users") {
-      await handleUsers(chatId, userId);
-    }
-
-  } catch (err) {
-    console.log("Process error:", err.message);
-  }
-}
-
-// =====================
-// POLLING
-// =====================
-
-let lastUpdateId = 0;
-
-async function pollMessages() {
-  try {
-    const url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN +
-      "/getUpdates?offset=" + (lastUpdateId + 1) + "&timeout=30";
-
-    const response = await new Promise((resolve, reject) => {
-      const req = https.get(url, { timeout: 35000 }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => { data += chunk; });
-        res.on("end", () => resolve(data));
-      });
-
-      req.on("error", reject);
-      req.on("timeout", () => {
-        req.destroy();
-        reject(new Error("Timeout"));
-      });
-    });
-
-    const result = JSON.parse(response);
-
-    if (result.ok && result.result) {
-      for (const update of result.result) {
-        lastUpdateId = update.update_id;
-        await processUpdate(update);
-      }
-    }
-
-  } catch (err) {
-    console.log("Poll error:", err.message);
-  }
-
-  setTimeout(pollMessages, 300);
-}
-
-// =====================
-// ALERT SYSTEM
-// =====================
-
-async function sendAlertToAll(message) {
-  for (const userId of approvedUsers) {
-    try {
-      await sendMessage(userId, message);
-      await new Promise(r => setTimeout(r, 500));
-    } catch {
-      console.log("Failed:", userId);
-    }
-  }
-}
-
-// =====================
-// DEXSCREENER SCANNER
-// =====================
-
-async function fetchUrl(url) {
+function fetchUrl(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { timeout: 15000 }, (res) => {
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => resolve({ data }));
-    });
+    const req = https.get(
+      url,
+      { headers: { "User-Agent": "Mozilla/5.0" } }, // FIX: prevents X blocking
+      (res) => {
+        let data = "";
+        res.on("data", (d) => (data += d));
+        res.on("end", () => resolve({ data }));
+      }
+    );
 
     req.on("error", reject);
     req.on("timeout", () => {
@@ -213,43 +69,196 @@ async function fetchUrl(url) {
   });
 }
 
-async function scanDexscreener() {
+// =====================
+// X SCORE + CREATION DATE
+// =====================
+
+async function scoreTwitter(url) {
+  try {
+    const res = await fetchUrl(url);
+    const html = res.data;
+
+    let score = 0;
+
+    if (html.includes("followers")) score++;
+    if (html.includes("verified")) score += 2;
+
+    // ===== CREATION DATE =====
+    let created = "Unknown";
+
+    const joinMatch = html.match(/Joined\s([A-Za-z]+\s\d{4})/);
+    if (joinMatch) {
+      created = joinMatch[1];
+
+      const year = parseInt(created.split(" ")[1]);
+      const currentYear = new Date().getFullYear();
+
+      // newer accounts = lower score (good)
+      if (currentYear - year <= 1) score -= 1;
+      if (currentYear - year >= 3) score += 1;
+    }
+
+    // ===== REGION =====
+    let region = "Unknown";
+
+    if (html.includes("Nigeria")) region = "Africa";
+    else if (html.includes("USA")) region = "North America";
+    else if (html.includes("UK")) region = "Europe";
+    else if (html.includes("India")) region = "Asia";
+    else if (html.includes("Dubai")) region = "Middle East";
+
+    return { score, region, created };
+  } catch {
+    return { score: 0, region: "Unknown", created: "Unknown" };
+  }
+}
+
+// =====================
+// ALERT
+// =====================
+
+async function sendAlert(msg) {
+  for (const user of approvedUsers) {
+    try {
+      await sendMessage(user, msg);
+      await new Promise((r) => setTimeout(r, 400));
+    } catch {}
+  }
+}
+
+// =====================
+// DEX SCANNER (<50K MC)
+// =====================
+
+async function scanDex() {
   try {
     const res = await fetchUrl("https://api.dexscreener.com/token-boosts/latest/v1");
 
-    if (res.data.startsWith("<")) return;
+    if (!res.data || res.data.startsWith("<")) return;
 
     const data = JSON.parse(res.data);
 
-    for (const token of data) {
-      if (!token.tokenAddress || seenTokens.has(token.tokenAddress)) continue;
-      seenTokens.add(token.tokenAddress);
+    for (const t of data) {
+      if (!t.tokenAddress || seenTokens.has(t.tokenAddress)) continue;
 
-      if (!token.description || token.description.length < 2) continue;
+      const mc = t.fdv || 0;
+
+      // 🔥 HARD FILTER
+      if (mc === 0 || mc > 50000) continue;
+
+      seenTokens.add(t.tokenAddress);
+
+      if (!t.description) continue;
 
       const socials = [];
-      if (token.links) {
-        for (const l of token.links) {
-          if (l.url) socials.push(l.url);
+
+      if (t.links) {
+        for (const l of t.links) {
+          if (l.url && !l.url.includes("dexscreener")) {
+            socials.push(l.url);
+          }
         }
       }
 
-      if (socials.length < 1) continue;
+      if (socials.length === 0 || socials.length > 3) continue;
 
-      let msg = "🚀 New Launch\n\n";
-      msg += "Name: " + token.description + "\n";
-      msg += "Chain: " + (token.chainId || "Unknown").toUpperCase() + "\n";
-      msg += "CA:\n" + token.tokenAddress + "\n\n";
-      msg += "Chart:\n" + (token.url || "https://dexscreener.com") + "\n\n";
-      msg += "Socials:\n" + socials.join("\n");
+      let twitter = socials.find(
+        (s) => s.includes("x.com") || s.includes("twitter")
+      );
 
-      console.log("New:", token.description);
+      let x = { score: 0, region: "Unknown", created: "Unknown" };
 
-      await sendAlertToAll(msg);
+      if (twitter) {
+        x = await scoreTwitter(twitter);
+      }
+
+      if (x.score > 3) continue;
+
+      let msg = `🚀 Dex Early (<50K MC)
+
+Name: ${t.description}
+Chain: ${t.chainId}
+
+CA:
+${t.tokenAddress}
+
+MC: $${mc}
+
+X Score: ${x.score}
+X Created: ${x.created}
+Region: ${x.region}
+
+${socials.join("\n")}`;
+
+      await sendAlert(msg);
     }
-
   } catch (err) {
-    console.log("Scan error:", err.message);
+    console.log("Dex error:", err.message);
+  }
+}
+
+// =====================
+// PUMPFUN SCANNER (<50K MC)
+// =====================
+
+async function scanPump() {
+  try {
+    const res = await fetchUrl("https://frontend-api.pump.fun/coins");
+
+    if (!res.data || res.data.startsWith("<")) return;
+
+    const data = JSON.parse(res.data);
+
+    for (const t of data) {
+      if (!t.mint || seenTokens.has(t.mint)) continue;
+
+      const mc = t.market_cap || 0;
+
+      // 🔥 HARD FILTER
+      if (mc === 0 || mc > 50000) continue;
+
+      seenTokens.add(t.mint);
+
+      if (!t.name) continue;
+
+      const socials = [];
+
+      if (t.twitter) socials.push(t.twitter);
+      if (t.telegram) socials.push(t.telegram);
+
+      if (socials.length === 0) continue;
+
+      let twitter = socials.find(
+        (s) => s.includes("x.com") || s.includes("twitter")
+      );
+
+      let x = { score: 0, region: "Unknown", created: "Unknown" };
+
+      if (twitter) {
+        x = await scoreTwitter(twitter);
+      }
+
+      if (x.score > 3) continue;
+
+      let msg = `🚀 Pump Early (<50K MC)
+
+Name: ${t.name}
+
+CA:
+${t.mint}
+
+MC: $${mc}
+
+X Score: ${x.score}
+X Created: ${x.created}
+Region: ${x.region}
+
+${socials.join("\n")}`;
+
+      await sendAlert(msg);
+    }
+  } catch (err) {
+    console.log("Pump error:", err.message);
   }
 }
 
@@ -257,17 +266,20 @@ async function scanDexscreener() {
 // SERVER
 // =====================
 
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end("Running | Users: " + approvedUsers.size);
-}).listen(process.env.PORT || 3000);
+http
+  .createServer((req, res) => {
+    res.end("Running");
+  })
+  .listen(process.env.PORT || 3000);
 
 // =====================
 // START
 // =====================
 
-console.log("Bot running...");
+setInterval(() => {
+  scanDex();
+  scanPump();
+}, 4000);
 
-pollMessages();
-setInterval(scanDexscreener, 5000);
-scanDexscreener();
+scanDex();
+scanPump();
