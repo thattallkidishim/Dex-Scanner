@@ -1,7 +1,7 @@
 {
-  "name": "dex-early-sniper",
-  "version": "8.0.0",
-  "description": "Dex-only multi-chain early token scanner (<50K MC) with socials & Twitter/X region alerts. Mobile-friendly, verified users only.",
+  "name": "dex-scanner-bot",
+  "version": "1.1.0",
+  "description": "Multi-chain Dex early token scanner with strict admin code verification and Telegram alerts.",
   "main": "scanner.js",
   "scripts": {
     "start": "node scanner.js"
@@ -9,5 +9,7 @@
   "engines": {
     "node": "20.x"
   },
+  "dependencies": {},
+  "author": "motionW404",
   "license": "MIT"
 }
