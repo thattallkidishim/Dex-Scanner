@@ -45,7 +45,7 @@ function sendMessage(chatId, text) {
 }
 
 // =====================
-// SAFE FETCH (ANTI-BLOCK)
+// FETCH (ANTI-BLOCK)
 // =====================
 
 function fetchUrl(url) {
@@ -68,15 +68,11 @@ function fetchUrl(url) {
     );
 
     req.on("error", reject);
-    req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("Timeout"));
-    });
   });
 }
 
 // =====================
-// X SCORING + CREATED DATE
+// X INTEL
 // =====================
 
 async function scoreTwitter(url) {
@@ -89,7 +85,6 @@ async function scoreTwitter(url) {
     if (html.includes("followers")) score++;
     if (html.includes("verified")) score += 2;
 
-    // ===== CREATED DATE =====
     let created = "Unknown";
 
     const match = html.match(/Joined\s([A-Za-z]+\s\d{4})/);
@@ -99,11 +94,10 @@ async function scoreTwitter(url) {
       const year = parseInt(created.split(" ")[1]);
       const now = new Date().getFullYear();
 
-      if (now - year <= 1) score -= 1; // newer = better
+      if (now - year <= 1) score -= 1;
       if (now - year >= 3) score += 1;
     }
 
-    // ===== REGION =====
     let region = "Unknown";
 
     if (html.includes("Nigeria")) region = "Africa";
@@ -119,7 +113,7 @@ async function scoreTwitter(url) {
 }
 
 // =====================
-// ALERT SYSTEM
+// ALERT
 // =====================
 
 async function sendAlert(msg) {
@@ -132,7 +126,7 @@ async function sendAlert(msg) {
 }
 
 // =====================
-// DEXSCREENER SCANNER (<50K)
+// DEX (<50K)
 // =====================
 
 async function scanDex() {
@@ -147,153 +141,101 @@ async function scanDex() {
       if (!t.tokenAddress || seenTokens.has(t.tokenAddress)) continue;
 
       const mc = t.fdv || 0;
-
-      // 🔥 HARD FILTER
       if (mc === 0 || mc > 50000) continue;
 
       seenTokens.add(t.tokenAddress);
-
-      if (!t.description) continue;
 
       const socials = [];
 
       if (t.links) {
         for (const l of t.links) {
-          if (l.url && !l.url.includes("dexscreener")) {
-            socials.push(l.url);
-          }
+          if (l.url && !l.url.includes("dexscreener")) socials.push(l.url);
         }
       }
 
       if (socials.length === 0 || socials.length > 3) continue;
 
-      let twitter = socials.find(
-        (s) => s.includes("x.com") || s.includes("twitter")
-      );
+      let twitter = socials.find(s => s.includes("x.com") || s.includes("twitter"));
 
       let x = { score: 0, region: "Unknown", created: "Unknown" };
-
-      if (twitter) {
-        x = await scoreTwitter(twitter);
-      }
+      if (twitter) x = await scoreTwitter(twitter);
 
       if (x.score > 3) continue;
 
-      let msg = `🚀 Dex Early (<50K MC)
-
-Name: ${t.description}
-Chain: ${t.chainId}
-
-CA:
-${t.tokenAddress}
+      let msg = `🚀 Dex Early
 
 MC: $${mc}
+X: ${x.score} | ${x.created} | ${x.region}
 
-X Score: ${x.score}
-X Created: ${x.created}
-Region: ${x.region}
-
+${t.tokenAddress}
 ${socials.join("\n")}`;
 
       await sendAlert(msg);
     }
-  } catch (err) {
-    console.log("Dex error:", err.message);
-  }
+  } catch {}
 }
 
 // =====================
-// PUMPFUN SCANNER (BEST VERSION)
+// 🔥 ULTRA EARLY PUMP
 // =====================
 
 async function scanPump() {
   try {
-    const endpoints = [
-      "https://frontend-api.pump.fun/coins/latest",
-      "https://frontend-api.pump.fun/coins/trending"
-    ];
+    const res = await fetchUrl("https://frontend-api.pump.fun/coins/latest");
 
-    for (const url of endpoints) {
-      const res = await fetchUrl(url);
+    if (!res.data || res.data.includes("error code")) {
+      console.log("Pump blocked");
+      return;
+    }
 
-      if (!res.data || res.data.startsWith("<") || res.data.includes("error code")) {
-        console.log("Pump blocked:", url);
-        continue;
-      }
+    const data = JSON.parse(res.data);
 
-      let data;
-      try {
-        data = JSON.parse(res.data);
-      } catch {
-        continue;
-      }
+    for (const t of data) {
+      if (!t.mint || seenTokens.has(t.mint)) continue;
 
-      for (const t of data) {
-        if (!t.mint || seenTokens.has(t.mint)) continue;
+      const mc = t.market_cap || 0;
 
-        const mc = t.market_cap || 0;
+      // 🔥 ULTRA EARLY FILTER
+      if (mc === 0 || mc > 20000) continue;
 
-        // 🔥 HARD FILTER
-        if (mc === 0 || mc > 50000) continue;
+      seenTokens.add(t.mint);
 
-        seenTokens.add(t.mint);
+      const socials = [];
 
-        if (!t.name) continue;
+      if (t.twitter) socials.push(t.twitter);
+      if (t.telegram) socials.push(t.telegram);
 
-        const socials = [];
+      // ULTRA EARLY = almost no socials
+      if (socials.length === 0 || socials.length > 2) continue;
 
-        if (t.twitter) socials.push(t.twitter);
-        if (t.telegram) socials.push(t.telegram);
-        if (t.website) socials.push(t.website);
+      let twitter = socials.find(s => s.includes("x.com") || s.includes("twitter"));
 
-        if (socials.length === 0 && t.description) {
-          const matches = t.description.match(/https?:\/\/[^\s]+/g);
-          if (matches) socials.push(...matches);
-        }
+      let x = { score: 0, region: "Unknown", created: "Unknown" };
+      if (twitter) x = await scoreTwitter(twitter);
 
-        if (socials.length === 0 || socials.length > 3) continue;
+      if (x.score > 2) continue;
 
-        let twitter = socials.find(
-          (s) => s.includes("x.com") || s.includes("twitter")
-        );
-
-        let x = { score: 0, region: "Unknown", created: "Unknown" };
-
-        if (twitter) {
-          x = await scoreTwitter(twitter);
-        }
-
-        if (x.score > 3) continue;
-
-        let msg = `🚀 Pump Early (<50K MC)
-
-Name: ${t.name}
-
-CA:
-${t.mint}
+      let msg = `🔥 ULTRA EARLY PUMP
 
 MC: $${mc}
+X: ${x.score} | ${x.created} | ${x.region}
 
-X Score: ${x.score}
-X Created: ${x.created}
-Region: ${x.region}
-
+${t.mint}
 ${socials.join("\n")}`;
 
-        console.log("Pump hit:", t.name);
+      console.log("ULTRA EARLY:", t.name);
 
-        await sendAlert(msg);
+      await sendAlert(msg);
 
-        await new Promise((r) => setTimeout(r, 200));
-      }
+      await new Promise(r => setTimeout(r, 200));
     }
   } catch (err) {
-    console.log("Pump fatal:", err.message);
+    console.log("Pump error:", err.message);
   }
 }
 
 // =====================
-// SERVER (KEEP ALIVE)
+// SERVER
 // =====================
 
 http.createServer((req, res) => {
@@ -307,7 +249,7 @@ http.createServer((req, res) => {
 setInterval(() => {
   scanDex();
   scanPump();
-}, 7000);
+}, 9000);
 
 scanDex();
 scanPump();
