@@ -7,27 +7,15 @@ const http = require("http");
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 
-const X_KEYWORDS = [
-  "launching soon",
-  "fair launch",
-  "stealth launch",
-  "token launch",
-  "memecoin",
-  "just launched",
-  "new coin",
-  "ca:",
-  "contract address"
-];
-
-const ENABLE_X_SCAN = true;
-
 // Users and seen items
 const approvedUsers = new Set();
 const seenTokens = new Set();
-const seenTweets = new Set();
-const alertedTokens = new Set(); // NEW: track alerts
-const alertedX = new Set(); // NEW: track X alerts
+const alertedTokens = new Set();
 
+// Pre-loaded one-time codes (admin can generate random codes)
+const validCodes = new Set();
+
+// Add admin automatically
 if (ADMIN_USER_ID) approvedUsers.add(String(ADMIN_USER_ID));
 
 // =====================
@@ -82,175 +70,190 @@ function fetchUrl(url) {
 }
 
 // =====================
-// SCORE X ACCOUNT
+// TWITTER REGION
 // =====================
-async function scoreTwitter(url) {
+async function getTwitterRegion(url) {
   try {
     const res = await fetchUrl(url);
     const html = res.data || "";
-
-    let score = 0;
-    if (html.includes("followers")) score++;
-    if (html.includes("verified")) score += 2;
-
-    let created = "Unknown";
-    const match = html.match(/Joined\s([A-Za-z]+\s\d{4})/);
-    if (match) {
-      created = match[1];
-      const year = parseInt(created.split(" ")[1]);
-      const now = new Date().getFullYear();
-      if (now - year <= 1) score -= 1;
-      if (now - year >= 3) score += 1;
-    }
-
     let region = "Unknown";
+
     if (html.includes("Nigeria")) region = "Africa";
     else if (html.includes("USA")) region = "North America";
     else if (html.includes("UK")) region = "Europe";
     else if (html.includes("India")) region = "Asia";
 
-    return { score, region, created };
+    return region;
   } catch {
-    return { score: 0, region: "Unknown", created: "Unknown" };
+    return "Unknown";
   }
 }
 
 // =====================
-// SEND ALERT
+// TELEGRAM COMMANDS
 // =====================
-async function sendAlert(msg) {
-  for (const user of approvedUsers) {
-    try {
-      await sendMessage(user, msg);
-      await new Promise(r => setTimeout(r, 400));
-    } catch {}
+async function handleStart(chatId, userId) {
+  if (approvedUsers.has(String(userId))) {
+    await sendMessage(chatId, "✅ You are already verified! You will receive all token alerts.");
+  } else {
+    await sendMessage(chatId,
+      "Welcome!\n\nTo get access, request your code from @motionw404 on Telegram.\n\n" +
+      "Then enter it here:\n/code YOURCODE\n\nExample: /code ABC123"
+    );
+  }
+}
+
+async function handleCode(chatId, userId, code) {
+  const userIdStr = String(userId);
+  if (approvedUsers.has(userIdStr)) {
+    await sendMessage(chatId, "✅ You are already verified!");
+    return;
+  }
+
+  if (!code) {
+    await sendMessage(chatId, "Please enter a code.\n\nExample: /code ABC123");
+    return;
+  }
+
+  const codeUpper = code.toUpperCase().trim();
+  if (validCodes.has(codeUpper)) {
+    validCodes.delete(codeUpper);
+    approvedUsers.add(userIdStr);
+    await sendMessage(chatId, "✅ Code accepted! You are now verified and will receive all token alerts.");
+    console.log("New user verified:", userId);
+  } else {
+    await sendMessage(chatId, "❌ Invalid code. Please request a valid one from @motionw404.");
   }
 }
 
 // =====================
-// DEX SCANNER (<50K MC)
+// ADMIN COMMANDS
+// =====================
+async function handleNewCode(chatId, userId) {
+  if (String(userId) !== String(ADMIN_USER_ID)) return;
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let newCode = "";
+  for (let i = 0; i < 6; i++) newCode += chars.charAt(Math.floor(Math.random() * chars.length));
+  validCodes.add(newCode);
+  await sendMessage(chatId, `✅ New code created:\n${newCode}\nWorks once. Share with user.`);
+}
+
+async function handleUsers(chatId, userId) {
+  if (String(userId) !== String(ADMIN_USER_ID)) return;
+  await sendMessage(chatId, `Verified users: ${approvedUsers.size}`);
+}
+
+async function handleCodes(chatId, userId) {
+  if (String(userId) !== String(ADMIN_USER_ID)) return;
+  const list = Array.from(validCodes).join("\n") || "No codes available";
+  await sendMessage(chatId, `Available codes:\n${list}`);
+}
+
+// =====================
+// PROCESS TELEGRAM UPDATES
+// =====================
+async function processUpdate(update) {
+  if (!update.message || !update.message.text) return;
+  const chatId = update.message.chat.id;
+  const userId = update.message.from.id;
+  const text = update.message.text.trim();
+
+  if (text === "/start") await handleStart(chatId, userId);
+  else if (text.startsWith("/code ")) await handleCode(chatId, userId, text.substring(6).trim());
+  else if (text === "/code") await sendMessage(chatId, "Please enter your code.\n\nExample: /code ABC123");
+  else if (text === "/newcode") await handleNewCode(chatId, userId);
+  else if (text === "/users") await handleUsers(chatId, userId);
+  else if (text === "/codes") await handleCodes(chatId, userId);
+}
+
+// =====================
+// POLL TELEGRAM
+// =====================
+let lastUpdateId = 0;
+async function pollMessages() {
+  try {
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=30`;
+    const response = await new Promise((resolve, reject) => {
+      const req = https.get(url, { timeout: 35000 }, (res) => {
+        let data = "";
+        res.on("data", chunk => data += chunk);
+        res.on("end", () => resolve(data));
+      });
+      req.on("error", reject);
+      req.on("timeout", () => { req.destroy(); reject(new Error("Timeout")); });
+    });
+    const result = JSON.parse(response);
+    if (result.ok && result.result) {
+      for (const update of result.result) {
+        lastUpdateId = update.update_id;
+        await processUpdate(update);
+      }
+    }
+  } catch (err) { console.log("Poll error:", err.message); }
+  setTimeout(pollMessages, 1000);
+}
+
+// =====================
+// DEX SCANNER (<50K MC, multi-chain, socials & region)
 // =====================
 async function scanDex() {
   try {
     const res = await fetchUrl("https://api.dexscreener.com/token-boosts/latest/v1");
     if (!res.data || res.data.startsWith("<")) return;
-    const data = JSON.parse(res.data);
 
+    const data = JSON.parse(res.data);
     for (const t of data) {
       if (!t.tokenAddress || seenTokens.has(t.tokenAddress)) continue;
-
       const mc = t.fdv || 0;
       if (mc === 0 || mc > 50000) continue;
 
       seenTokens.add(t.tokenAddress);
-
-      // skip if already alerted
       if (alertedTokens.has(t.tokenAddress)) continue;
 
       const socials = [];
-      if (t.links) {
-        for (const l of t.links) {
-          if (l.url && !l.url.includes("dexscreener")) socials.push(l.url);
-        }
+      if (t.links) for (const l of t.links) if (l.url && !l.url.includes("dexscreener")) socials.push(l.url);
+      if (socials.length === 0) continue;
+
+      let regionInfo = "";
+      const twitter = socials.find(s => s.includes("x.com") || s.includes("twitter"));
+      if (twitter) {
+        const region = await getTwitterRegion(twitter);
+        regionInfo = ` | Region: ${region}`;
       }
-      if (socials.length === 0 || socials.length > 3) continue;
 
-      let twitter = socials.find(s => s.includes("x.com") || s.includes("twitter"));
-      let x = { score: 0, region: "Unknown", created: "Unknown" };
-      if (twitter) x = await scoreTwitter(twitter);
-      if (x.score > 3) continue;
+      const chains = t.chainId ? t.chainId.toUpperCase() : "Unknown";
 
-      let msg = `🚀 Dex Early
+      const msg = `🚀 NEW EARLY TOKEN DETECTED
 
+Name: ${t.description || "Unknown"}
+Chain: ${chains}
 MC: $${mc}
-X Score: ${x.score} | ${x.created} | ${x.region}
+Contract: ${t.tokenAddress}${regionInfo}
 
-${t.tokenAddress}
+Socials:
 ${socials.join("\n")}`;
 
-      await sendAlert(msg);
-      alertedTokens.add(t.tokenAddress); // MARK ALERTED
+      await sendMessageToAll(msg);
+      alertedTokens.add(t.tokenAddress);
     }
-  } catch (err) {
-    console.log("Dex error:", err.message);
+  } catch (err) { console.log("Dex scanner error:", err.message); }
+}
+
+async function sendMessageToAll(msg) {
+  for (const user of approvedUsers) {
+    try { await sendMessage(user, msg); await new Promise(r => setTimeout(r, 400)); }
+    catch {}
   }
 }
 
 // =====================
-// X SPOTTER (OPTIONAL)
+// KEEP ALIVE
 // =====================
-async function scanX() {
-  if (!ENABLE_X_SCAN) return;
-  const NITTER_INSTANCES = [
-    "https://nitter.net",
-    "https://nitter.poast.org",
-    "https://nitter.privacydev.net"
-  ];
-
-  try {
-    let html = null;
-    for (const base of NITTER_INSTANCES) {
-      const res = await fetchUrl(`${base}/search?f=tweets&q=launch`);
-      if (res.data && !res.data.includes("error")) {
-        html = res.data;
-        break;
-      }
-    }
-    if (!html) return;
-
-    const tweets = html.split("timeline-item");
-    for (const t of tweets) {
-      try {
-        const textMatch = t.match(/tweet-content[^>]*>(.*?)<\/div>/);
-        const linkMatch = t.match(/href="\/([^"]+)\/status\/(\d+)"/);
-        if (!textMatch || !linkMatch) continue;
-
-        const rawText = textMatch[1];
-        const text = rawText.toLowerCase().replace(/<[^>]+>/g, "");
-        if (!X_KEYWORDS.some(k => text.includes(k))) continue;
-
-        const username = linkMatch[1];
-        const tweetId = linkMatch[2];
-        const key = username + tweetId;
-        if (seenTweets.has(key) || alertedX.has(key)) continue;
-        seenTweets.add(key);
-
-        const profileUrl = `https://x.com/${username}`;
-        const x = await scoreTwitter(profileUrl);
-        if (x.score > 3) continue;
-
-        let msg = `🐦 X EARLY SIGNAL
-
-https://x.com/${username}
-
-Score: ${x.score}
-Created: ${x.created}
-Region: ${x.region}
-
-${text}`;
-
-        await sendAlert(msg);
-        alertedX.add(key); // MARK ALERTED
-        await new Promise(r => setTimeout(r, 600));
-      } catch { continue; }
-    }
-  } catch (err) {
-    console.log("X scan skipped:", err.message);
-  }
-}
+http.createServer((req, res) => res.end("Dex Scanner Bot Running")).listen(process.env.PORT || 3000);
 
 // =====================
-// SERVER KEEPALIVE
+// START BOT
 // =====================
-http.createServer((req, res) => res.end("Running")).listen(process.env.PORT || 3000);
-
-// =====================
-// START LOOP
-// =====================
-setInterval(() => {
-  scanDex();
-  scanX();
-}, 30000);
-
+pollMessages();
+setInterval(scanDex, 10000);
 scanDex();
-scanX();
