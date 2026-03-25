@@ -1,6 +1,6 @@
 {
-  "name": "alpha-sniper-ultra",
-  "version": "5.0.0",
+  "name": "alpha-x-sniper",
+  "version": "6.0.0",
   "main": "scanner.js",
   "scripts": {
     "start": "node scanner.js"
@@ -8,6 +8,6 @@
   "engines": {
     "node": "20.x"
   },
-  "description": "Ultra early sniper bot (Dex + Pump + X intelligence)",
+  "description": "Dex + X early launch sniper bot (no pump)",
   "license": "MIT"
 }
