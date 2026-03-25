@@ -8,8 +8,22 @@ const http = require("http");
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 
+// 👉 ADD YOUR TARGET KEYWORDS (edit anytime)
+const X_KEYWORDS = [
+  "launching soon",
+  "fair launch",
+  "stealth launch",
+  "token launch",
+  "memecoin",
+  "just launched",
+  "new coin",
+  "CA:",
+  "contract address"
+];
+
 const approvedUsers = new Set();
 const seenTokens = new Set();
+const seenTweets = new Set();
 
 if (ADMIN_USER_ID) {
   approvedUsers.add(String(ADMIN_USER_ID));
@@ -45,34 +59,25 @@ function sendMessage(chatId, text) {
 }
 
 // =====================
-// FETCH (ANTI-BLOCK)
+// FETCH (SAFE)
 // =====================
 
 function fetchUrl(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(
-      url,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-          "Accept": "application/json, text/plain, */*",
-          "Referer": "https://pump.fun/",
-          "Origin": "https://pump.fun"
-        }
-      },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => resolve({ data }));
+    https.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
       }
-    );
-
-    req.on("error", reject);
+    }, (res) => {
+      let data = "";
+      res.on("data", d => data += d);
+      res.on("end", () => resolve({ data }));
+    }).on("error", reject);
   });
 }
 
 // =====================
-// X INTEL
+// X INTELLIGENCE
 // =====================
 
 async function scoreTwitter(url) {
@@ -104,9 +109,9 @@ async function scoreTwitter(url) {
     else if (html.includes("USA")) region = "North America";
     else if (html.includes("UK")) region = "Europe";
     else if (html.includes("India")) region = "Asia";
-    else if (html.includes("Dubai")) region = "Middle East";
 
     return { score, region, created };
+
   } catch {
     return { score: 0, region: "Unknown", created: "Unknown" };
   }
@@ -120,13 +125,13 @@ async function sendAlert(msg) {
   for (const user of approvedUsers) {
     try {
       await sendMessage(user, msg);
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 400));
     } catch {}
   }
 }
 
 // =====================
-// DEX (<50K)
+// DEX SCANNER (<50K)
 // =====================
 
 async function scanDex() {
@@ -149,7 +154,9 @@ async function scanDex() {
 
       if (t.links) {
         for (const l of t.links) {
-          if (l.url && !l.url.includes("dexscreener")) socials.push(l.url);
+          if (l.url && !l.url.includes("dexscreener")) {
+            socials.push(l.url);
+          }
         }
       }
 
@@ -172,65 +179,69 @@ ${socials.join("\n")}`;
 
       await sendAlert(msg);
     }
-  } catch {}
+
+  } catch (err) {
+    console.log("Dex error:", err.message);
+  }
 }
 
 // =====================
-// 🔥 ULTRA EARLY PUMP
+// 🔥 X SPOTTER (NEW)
 // =====================
 
-async function scanPump() {
+async function scanX() {
   try {
-    const res = await fetchUrl("https://frontend-api.pump.fun/coins/latest");
+    const res = await fetchUrl("https://nitter.net/search?f=tweets&q=launch");
 
-    if (!res.data || res.data.includes("error code")) {
-      console.log("Pump blocked");
-      return;
-    }
+    if (!res.data) return;
 
-    const data = JSON.parse(res.data);
+    const html = res.data;
 
-    for (const t of data) {
-      if (!t.mint || seenTokens.has(t.mint)) continue;
+    const tweets = html.split("timeline-item");
 
-      const mc = t.market_cap || 0;
+    for (const t of tweets) {
+      const textMatch = t.match(/tweet-content[^>]*>(.*?)<\/div>/);
+      const linkMatch = t.match(/href="\/([^"]+)\/status\/(\d+)"/);
 
-      // 🔥 ULTRA EARLY FILTER
-      if (mc === 0 || mc > 20000) continue;
+      if (!textMatch || !linkMatch) continue;
 
-      seenTokens.add(t.mint);
+      const text = textMatch[1].toLowerCase();
 
-      const socials = [];
+      // keyword filter
+      if (!X_KEYWORDS.some(k => text.includes(k))) continue;
 
-      if (t.twitter) socials.push(t.twitter);
-      if (t.telegram) socials.push(t.telegram);
+      const username = linkMatch[1];
+      const tweetId = linkMatch[2];
 
-      // ULTRA EARLY = almost no socials
-      if (socials.length === 0 || socials.length > 2) continue;
+      const tweetKey = username + tweetId;
+      if (seenTweets.has(tweetKey)) continue;
 
-      let twitter = socials.find(s => s.includes("x.com") || s.includes("twitter"));
+      seenTweets.add(tweetKey);
 
-      let x = { score: 0, region: "Unknown", created: "Unknown" };
-      if (twitter) x = await scoreTwitter(twitter);
+      const profileUrl = `https://x.com/${username}`;
 
-      if (x.score > 2) continue;
+      const x = await scoreTwitter(profileUrl);
 
-      let msg = `🔥 ULTRA EARLY PUMP
+      if (x.score > 3) continue;
 
-MC: $${mc}
-X: ${x.score} | ${x.created} | ${x.region}
+      let msg = `🐦 X EARLY SIGNAL
 
-${t.mint}
-${socials.join("\n")}`;
+User: https://x.com/${username}
 
-      console.log("ULTRA EARLY:", t.name);
+X Score: ${x.score}
+Created: ${x.created}
+Region: ${x.region}
+
+Tweet:
+${text.replace(/<[^>]+>/g, "")}`;
 
       await sendAlert(msg);
 
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 500));
     }
+
   } catch (err) {
-    console.log("Pump error:", err.message);
+    console.log("X scan error:", err.message);
   }
 }
 
@@ -248,8 +259,8 @@ http.createServer((req, res) => {
 
 setInterval(() => {
   scanDex();
-  scanPump();
-}, 9000);
+  scanX();
+}, 10000);
 
 scanDex();
-scanPump();
+scanX();
