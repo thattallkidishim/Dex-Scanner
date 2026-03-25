@@ -1,10 +1,21 @@
 {
   "name": "dex-scanner",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "description": "Private multi-chain crypto launch scanner with Telegram alerts",
+  "main": "scanner.js",
   "scripts": {
-    "start": "node scanner.js"
+    "start": "node scanner.js",
+    "restart": "node scanner.js"
   },
   "engines": {
     "node": "20.x"
-  }
+  },
+  "keywords": [
+    "crypto",
+    "dexscreener",
+    "telegram-bot",
+    "scanner"
+  ],
+  "author": "",
+  "license": "MIT"
 }
