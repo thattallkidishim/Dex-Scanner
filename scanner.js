@@ -70,19 +70,40 @@ async function scanDex() {
 
 const SUBREDDITS = [
   "CryptoMoonShots",
-  "SatoshiStreetBets",
-  "cryptoProjects",
-  "defi",
-  "web3",
-  "solana",
-  "ethereum",
-  "BaseChain",
   "memecoin",
-  "CryptoGemDiscovery",
   "NewCryptoListings",
-  "ico",
-  "DeFiInvesting"
+  "CryptoGemDiscovery",
+  "ico"
 ];
+
+// Only posts containing at least one of these keywords will be sent
+const KEYWORDS = [
+  "just launched",
+  "new launch",
+  "launching now",
+  "launching today",
+  "stealth launch",
+  "fair launch",
+  "presale",
+  "pre-sale",
+  "new token",
+  "new coin",
+  "new memecoin",
+  "gem",
+  "low cap",
+  "100x",
+  "contract address",
+  "ca:",
+  "pump",
+  "dex",
+  "listed",
+  "listing"
+];
+
+function isRelevant(title, text) {
+  const content = (title + " " + (text || "")).toLowerCase();
+  return KEYWORDS.some(function(kw) { return content.includes(kw); });
+}
 
 const BROWSER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -90,7 +111,7 @@ async function scanReddit() {
   for (const sub of SUBREDDITS) {
     try {
       const res = await fetch(
-        "https://www.reddit.com/r/" + sub + "/new.json?limit=10",
+        "https://www.reddit.com/r/" + sub + "/new.json?limit=15",
         { headers: { "User-Agent": BROWSER_AGENT } }
       );
 
@@ -111,20 +132,25 @@ async function scanReddit() {
 
       const data = await res.json();
 
-      if (!data.data || !data.data.children) {
-        console.log("[REDDIT] No posts found on r/" + sub);
-        continue;
-      }
+      if (!data.data || !data.data.children) continue;
 
       let newCount = 0;
 
       for (const post of data.data.children) {
         const p = post.data;
+
         if (seenPosts.has(p.id)) continue;
         seenPosts.add(p.id);
+
+        // Skip if no relevant keywords found
+        if (!isRelevant(p.title, p.selftext)) {
+          console.log("[REDDIT] Skipped (not relevant): " + p.title);
+          continue;
+        }
+
         newCount++;
 
-        let msg = "📢 New Reddit Post\n";
+        let msg = "🔥 New Launch Spotted on Reddit\n";
         msg += "Sub: r/" + p.subreddit + "\n";
         msg += "Title: " + p.title + "\n";
         msg += "Author: u/" + p.author + "\n";
@@ -140,7 +166,7 @@ async function scanReddit() {
         await new Promise(function(r) { setTimeout(r, 1500); });
       }
 
-      console.log("[REDDIT] r/" + sub + " — " + newCount + " new posts");
+      console.log("[REDDIT] r/" + sub + " — " + newCount + " relevant posts");
       await new Promise(function(r) { setTimeout(r, 2000); });
 
     } catch (err) {
