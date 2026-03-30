@@ -75,16 +75,23 @@ const SUBREDDITS = [
   "altcoin"
 ];
 
+const BROWSER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
 async function scanReddit() {
   for (const sub of SUBREDDITS) {
     try {
       const res = await fetch(
         "https://www.reddit.com/r/" + sub + "/new.json?limit=10",
-        { headers: { "User-Agent": "token-scanner-bot/1.0" } }
+        { headers: { "User-Agent": BROWSER_AGENT } }
       );
 
       if (res.status === 429) {
         console.log("[REDDIT] Rate limited on r/" + sub + ", skipping...");
+        continue;
+      }
+
+      if (res.status === 403) {
+        console.log("[REDDIT] r/" + sub + " is restricted, skipping...");
         continue;
       }
 
@@ -125,8 +132,6 @@ async function scanReddit() {
       }
 
       console.log("[REDDIT] r/" + sub + " — " + newCount + " new posts");
-
-      // Small delay between subreddits to avoid rate limiting
       await new Promise(function(r) { setTimeout(r, 2000); });
 
     } catch (err) {
@@ -143,4 +148,4 @@ scanDex();
 scanReddit();
 
 setInterval(scanDex, 5000);
-setInterval(scanReddit, 60000); // Reddit every 60s to avoid rate limits
+setInterval(scanReddit, 60000);
