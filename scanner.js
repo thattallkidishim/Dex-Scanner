@@ -31,6 +31,50 @@ async function sendToChat(chatId, message) {
   }
 }
 
+// ─── Pin a message ────────────────────────────────────────────────────────────
+
+async function pinMessage(chatId, messageId) {
+  try {
+    const url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/pinChatMessage";
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        disable_notification: true
+      })
+    });
+    console.log("[BOT] Message pinned in chat " + chatId);
+  } catch (err) {
+    console.log("[BOT] Pin error:", err.message);
+  }
+}
+
+// ─── Send and auto pin ────────────────────────────────────────────────────────
+
+async function sendAndPin(chatId, message) {
+  try {
+    const url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: "HTML",
+        disable_web_page_preview: true
+      })
+    });
+    const data = await res.json();
+    if (data.result && data.result.message_id) {
+      await pinMessage(chatId, data.result.message_id);
+    }
+  } catch (err) {
+    console.log("[BOT] sendAndPin error:", err.message);
+  }
+}
+
 // ─── Broadcast to all users ───────────────────────────────────────────────────
 
 async function sendTelegram(message) {
@@ -56,7 +100,11 @@ async function sendStartupMessage() {
     "/help — List all commands\n" +
     "━━━━━━━━━━━━━━━━━━━━\n" +
     "🟢 <b>All systems running</b>";
-  await sendTelegram(msg);
+
+  for (const chatId of authorizedChats) {
+    await sendAndPin(chatId, msg);
+    totalAlerts++;
+  }
 }
 
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
@@ -93,7 +141,7 @@ async function handleMessage(msg) {
 
   if (text === "/start") {
     authorizedChats.add(chatId);
-    await sendToChat(chatId,
+    await sendAndPin(chatId,
       "👋 <b>Welcome " + firstName + "!</b>\n" +
       "━━━━━━━━━━━━━━━━━━━━\n" +
       "✅ You are now subscribed to alerts\n" +
@@ -144,7 +192,7 @@ async function handleMessage(msg) {
   }
 
   if (text === "/help") {
-    await sendToChat(chatId,
+    await sendAndPin(chatId,
       "📋 <b>Available Commands</b>\n" +
       "━━━━━━━━━━━━━━━━━━━━\n" +
       "/start — Subscribe to all alerts\n" +
@@ -153,8 +201,23 @@ async function handleMessage(msg) {
       "/help — Show this message\n" +
       "━━━━━━━━━━━━━━━━━━━━\n" +
       "📡 <b>What we scan:</b>\n" +
-      "• DexScreener new token boosts\n" +
-      "• Reddit launch posts across 5 subs\n" +
+      "• 🚨 DexScreener new token boosts\n" +
+      "• 🔥 Reddit launch posts across 5 subs\n" +
+      "• ⛓ Supports SOL, ETH, BSC, BASE & more\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "🛠 <b>Bot Info:</b>\n" +
+      "• Version: 1.0.0\n" +
+      "• Scan speed: Every 5s (DEX) / 60s (Reddit)\n" +
+      "• Alerts: Real-time broadcasts to all subscribers\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "👨‍💻 <b>Developer:</b>\n" +
+      "• Built & maintained by <b>@motionw404</b>\n" +
+      "• For bug reports, feature requests or\n" +
+      "  custom bot inquiries contact <b>@motionw404</b>\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "⚠️ <b>Disclaimer:</b>\n" +
+      "This bot is for informational purposes only.\n" +
+      "Always DYOR before investing.\n" +
       "━━━━━━━━━━━━━━━━━━━━"
     );
     return;
@@ -162,7 +225,7 @@ async function handleMessage(msg) {
 
   // Unknown command
   await sendToChat(chatId,
-    "❓ <b>Unknown command</b>\n" +
+    "❓ <b>Unknown Command</b>\n" +
     "━━━━━━━━━━━━━━━━━━━━\n" +
     "Send /help to see all available commands.\n" +
     "━━━━━━━━━━━━━━━━━━━━"
