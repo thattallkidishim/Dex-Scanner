@@ -3,27 +3,44 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const seenPairs = new Set();
 const seenPosts = new Set();
+const authorizedChats = new Set([TELEGRAM_CHAT_ID]);
 let totalAlerts = 0;
 let startTime = Date.now();
 
-async function sendTelegram(message, options = {}) {
+// ─── Send to one chat ─────────────────────────────────────────────────────────
+
+async function sendToChat(chatId, message) {
   try {
     const url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage";
-    await fetch(url, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
+        chat_id: chatId,
         text: message,
         parse_mode: "HTML",
-        disable_web_page_preview: options.preview === true ? false : true
+        disable_web_page_preview: true
       })
     });
-    totalAlerts++;
+    if (!res.ok) {
+      const err = await res.text();
+      console.log("[TELEGRAM] Send error:", err);
+    }
   } catch (err) {
-    console.log("Telegram error:", err.message);
+    console.log("[TELEGRAM] Error:", err.message);
   }
 }
+
+// ─── Broadcast to all users ───────────────────────────────────────────────────
+
+async function sendTelegram(message) {
+  for (const chatId of authorizedChats) {
+    await sendToChat(chatId, message);
+    totalAlerts++;
+  }
+}
+
+// ─── Startup Message ──────────────────────────────────────────────────────────
 
 async function sendStartupMessage() {
   const msg =
@@ -32,12 +49,17 @@ async function sendStartupMessage() {
     "✅ DexScreener — Active\n" +
     "✅ Reddit — Active\n" +
     "━━━━━━━━━━━━━━━━━━━━\n" +
-    "⏱ Scanning every <b>5s</b> for new tokens\n" +
-    "📡 Monitoring <b>5 subreddits</b> for launches\n" +
+    "📋 <b>Commands:</b>\n" +
+    "/start — Subscribe to alerts\n" +
+    "/stop — Unsubscribe from alerts\n" +
+    "/status — View bot stats\n" +
+    "/help — List all commands\n" +
     "━━━━━━━━━━━━━━━━━━━━\n" +
     "🟢 <b>All systems running</b>";
   await sendTelegram(msg);
 }
+
+// ─── Heartbeat ────────────────────────────────────────────────────────────────
 
 async function sendHeartbeat() {
   const uptime = Math.floor((Date.now() - startTime) / 1000 / 60);
@@ -52,10 +74,129 @@ async function sendHeartbeat() {
     "🚨 Tokens tracked: <b>" + seenPairs.size + "</b>\n" +
     "📢 Reddit posts tracked: <b>" + seenPosts.size + "</b>\n" +
     "📬 Total alerts sent: <b>" + totalAlerts + "</b>\n" +
+    "👥 Active users: <b>" + authorizedChats.size + "</b>\n" +
     "━━━━━━━━━━━━━━━━━━━━\n" +
     "🟢 <b>Bot is running fine</b>";
   await sendTelegram(msg);
 }
+
+// ─── Handle Commands ──────────────────────────────────────────────────────────
+
+async function handleMessage(msg) {
+  const chatId = String(msg.chat.id);
+  const text = (msg.text || "").trim();
+  const firstName = msg.from && msg.from.first_name ? msg.from.first_name : "there";
+
+  if (!text) return;
+
+  console.log("[BOT] Message from " + chatId + ": " + text);
+
+  if (text === "/start") {
+    authorizedChats.add(chatId);
+    await sendToChat(chatId,
+      "👋 <b>Welcome " + firstName + "!</b>\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "✅ You are now subscribed to alerts\n" +
+      "📡 You will receive:\n" +
+      "  • 🚨 New token launches from DexScreener\n" +
+      "  • 🔥 New launch posts from Reddit\n" +
+      "  • 📊 Status reports every 30 minutes\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "📋 <b>Commands:</b>\n" +
+      "/stop — Unsubscribe from alerts\n" +
+      "/status — View live bot stats\n" +
+      "/help — Show all commands\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "🟢 <b>Bot is active and scanning</b>"
+    );
+    return;
+  }
+
+  if (text === "/stop") {
+    authorizedChats.delete(chatId);
+    await sendToChat(chatId,
+      "🔴 <b>Alerts Stopped</b>\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "You have unsubscribed from all alerts.\n" +
+      "Send /start anytime to resubscribe.\n" +
+      "━━━━━━━━━━━━━━━━━━━━"
+    );
+    return;
+  }
+
+  if (text === "/status") {
+    const uptime = Math.floor((Date.now() - startTime) / 1000 / 60);
+    const hours = Math.floor(uptime / 60);
+    const minutes = uptime % 60;
+    const uptimeStr = hours > 0 ? hours + "h " + minutes + "m" : minutes + "m";
+    await sendToChat(chatId,
+      "📊 <b>Live Bot Status</b>\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "⏱ Uptime: <b>" + uptimeStr + "</b>\n" +
+      "🚨 Tokens tracked: <b>" + seenPairs.size + "</b>\n" +
+      "📢 Reddit posts tracked: <b>" + seenPosts.size + "</b>\n" +
+      "📬 Total alerts sent: <b>" + totalAlerts + "</b>\n" +
+      "👥 Active users: <b>" + authorizedChats.size + "</b>\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "🟢 <b>All systems running</b>"
+    );
+    return;
+  }
+
+  if (text === "/help") {
+    await sendToChat(chatId,
+      "📋 <b>Available Commands</b>\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "/start — Subscribe to all alerts\n" +
+      "/stop — Unsubscribe from alerts\n" +
+      "/status — View live bot stats\n" +
+      "/help — Show this message\n" +
+      "━━━━━━━━━━━━━━━━━━━━\n" +
+      "📡 <b>What we scan:</b>\n" +
+      "• DexScreener new token boosts\n" +
+      "• Reddit launch posts across 5 subs\n" +
+      "━━━━━━━━━━━━━━━━━━━━"
+    );
+    return;
+  }
+
+  // Unknown command
+  await sendToChat(chatId,
+    "❓ <b>Unknown command</b>\n" +
+    "━━━━━━━━━━━━━━━━━━━━\n" +
+    "Send /help to see all available commands.\n" +
+    "━━━━━━━━━━━━━━━━━━━━"
+  );
+}
+
+// ─── Poll for Updates ─────────────────────────────────────────────────────────
+
+async function pollUpdates() {
+  let offset = 0;
+  while (true) {
+    try {
+      const res = await fetch(
+        "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN +
+        "/getUpdates?offset=" + offset + "&timeout=30"
+      );
+      const data = await res.json();
+
+      if (data.result && data.result.length > 0) {
+        for (const update of data.result) {
+          offset = update.update_id + 1;
+          if (update.message) {
+            await handleMessage(update.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.log("[POLL] Error:", err.message);
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  }
+}
+
+// ─── DexScreener Scanner ──────────────────────────────────────────────────────
 
 async function scanDex() {
   try {
@@ -109,7 +250,7 @@ async function scanDex() {
       msg += "\n━━━━━━━━━━━━━━━━━━━━";
 
       console.log("[DEX] New token: " + (token.description || token.tokenAddress));
-      await sendTelegram(msg, { preview: false });
+      await sendTelegram(msg);
       await new Promise(function(r) { setTimeout(r, 1500); });
     }
 
@@ -121,6 +262,8 @@ async function scanDex() {
   }
 }
 
+// ─── Reddit Scanner ───────────────────────────────────────────────────────────
+
 const SUBREDDITS = [
   "CryptoMoonShots",
   "memecoin",
@@ -130,26 +273,10 @@ const SUBREDDITS = [
 ];
 
 const KEYWORDS = [
-  "just launched",
-  "new launch",
-  "launching now",
-  "launching today",
-  "stealth launch",
-  "fair launch",
-  "presale",
-  "pre-sale",
-  "new token",
-  "new coin",
-  "new memecoin",
-  "gem",
-  "low cap",
-  "100x",
-  "contract address",
-  "ca:",
-  "pump",
-  "dex",
-  "listed",
-  "listing"
+  "just launched", "new launch", "launching now", "launching today",
+  "stealth launch", "fair launch", "presale", "pre-sale",
+  "new token", "new coin", "new memecoin", "gem", "low cap",
+  "100x", "contract address", "ca:", "pump", "dex", "listed", "listing"
 ];
 
 function isRelevant(title, text) {
@@ -167,20 +294,9 @@ async function scanReddit() {
         { headers: { "User-Agent": BROWSER_AGENT } }
       );
 
-      if (res.status === 429) {
-        console.log("[REDDIT] Rate limited on r/" + sub + ", skipping...");
-        continue;
-      }
-
-      if (res.status === 403) {
-        console.log("[REDDIT] r/" + sub + " is restricted, skipping...");
-        continue;
-      }
-
-      if (!res.ok) {
-        console.log("[REDDIT] Error on r/" + sub + ": HTTP " + res.status);
-        continue;
-      }
+      if (res.status === 429) { console.log("[REDDIT] Rate limited on r/" + sub); continue; }
+      if (res.status === 403) { console.log("[REDDIT] r/" + sub + " restricted, skipping..."); continue; }
+      if (!res.ok) { console.log("[REDDIT] Error on r/" + sub + ": HTTP " + res.status); continue; }
 
       const data = await res.json();
       if (!data.data || !data.data.children) continue;
@@ -189,18 +305,11 @@ async function scanReddit() {
 
       for (const post of data.data.children) {
         const p = post.data;
-
         if (seenPosts.has(p.id)) continue;
         seenPosts.add(p.id);
-
-        if (!isRelevant(p.title, p.selftext)) {
-          console.log("[REDDIT] Skipped (not relevant): " + p.title);
-          continue;
-        }
+        if (!isRelevant(p.title, p.selftext)) continue;
 
         newCount++;
-
-        const postUrl = "https://reddit.com" + p.permalink;
 
         let msg =
           "🔥 <b>New Launch Spotted</b>\n" +
@@ -212,16 +321,16 @@ async function scanReddit() {
           "⬆️ Upvotes: <b>" + p.ups + "</b>\n" +
           "💬 Comments: <b>" + p.num_comments + "</b>\n" +
           "━━━━━━━━━━━━━━━━━━━━\n" +
-          "🔗 <a href='" + postUrl + "'>View Post on Reddit</a>";
+          "🔗 <a href='https://reddit.com" + p.permalink + "'>View Post</a>";
 
         if (p.url && !p.url.includes("reddit.com")) {
-          msg += "\n🌐 <a href='" + p.url + "'>External Link</a>";
+          msg += " | <a href='" + p.url + "'>External Link</a>";
         }
 
         msg += "\n━━━━━━━━━━━━━━━━━━━━";
 
         console.log("[REDDIT] New relevant post: " + p.title);
-        await sendTelegram(msg, { preview: false });
+        await sendTelegram(msg);
         await new Promise(function(r) { setTimeout(r, 1500); });
       }
 
@@ -230,12 +339,13 @@ async function scanReddit() {
       }
 
       await new Promise(function(r) { setTimeout(r, 2000); });
-
     } catch (err) {
       console.log("[REDDIT] Scan error on r/" + sub + ":", err.message);
     }
   }
 }
+
+// ─── Start ────────────────────────────────────────────────────────────────────
 
 console.log("Scanner started...");
 console.log("Bot token set:", TELEGRAM_BOT_TOKEN ? "Yes" : "No");
@@ -244,9 +354,8 @@ console.log("Chat ID set:", TELEGRAM_CHAT_ID ? "Yes" : "No");
 sendStartupMessage();
 scanDex();
 scanReddit();
+pollUpdates();
 
 setInterval(scanDex, 5000);
 setInterval(scanReddit, 60000);
-
-// Heartbeat status report every 30 minutes
 setInterval(sendHeartbeat, 30 * 60 * 1000);
